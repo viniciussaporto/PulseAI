@@ -1,17 +1,19 @@
 const { Client, GatewayIntentBits, Partials, Permissions, EmbedBuilder } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
+const { MongoClient } = require('mongodb');
+const fs = require('fs');
 
 require('dotenv').config();
 
 const token = process.env.TOKEN;
 const clientId = process.env.CLIENT_ID;
+const mongoConnectionString = process.env.MONGO_CONNECTION_STRING;
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
 
-client.on('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
-});
+// Error log file stream
+const errorLogStream = fs.createWriteStream('error.log', { flags: 'a' });
 
 async function registerGuildSlashCommands(guildId) {
   try {
@@ -97,8 +99,20 @@ async function registerGuildSlashCommands(guildId) {
     );
 
     console.log(`Successfully registered guild (${guildId}) commands.`);
+
+    // Fetch the roles data for the specific guild from MongoDB Atlas
+    const rolesData = await getRolesData(guildId);
+
+    // Process the roles data and update your bot logic accordingly
+    const availableroles = rolesData.availableroles;
+    const removedroles = rolesData.removedroles;
+
+    // Update your bot logic with the fetched data
+    // For example, you can filter out the removed roles from the available roles list
+
   } catch (error) {
     console.error(`Error registering guild (${guildId}) commands:`, error);
+    errorLogStream.write(`Error registering guild (${guildId}) commands: ${error}\n`);
   }
 }
 
@@ -112,6 +126,62 @@ function chunkArray(array, chunkSize) {
   }
 
   return chunks;
+}
+
+async function createGuildCollection(guildId) {
+  const client = new MongoClient(mongoConnectionString, { useNewUrlParser: true, useUnifiedTopology: true });
+
+  try {
+    await client.connect();
+    console.log('Connected to MongoDB Atlas');
+
+    const database = client.db('Cluster0'); // Use the default database from the connection string
+    const collection = database.collection(guildId); // Use the guildId as the collection name
+
+    const collectionExists = await collection.countDocuments() > 0;
+
+    if (!collectionExists) {
+      const initialData = { guildId: guildId, availableroles: [], removedroles: [] };
+      await collection.insertOne(initialData);
+      console.log(`Created collection for guild ${guildId}`);
+    } else {
+      console.log(`Collection for guild ${guildId} already exists`);
+    }
+  } catch (error) {
+    console.error('Error connecting to MongoDB Atlas:', error);
+    errorLogStream.write(`Error connecting to MongoDB Atlas: ${error}\n`);
+  } finally {
+    await client.close();
+    console.log('Disconnected from MongoDB Atlas');
+  }
+}
+
+async function getRolesData(guildId) {
+  const client = new MongoClient(mongoConnectionString, { useNewUrlParser: true, useUnifiedTopology: true });
+
+  try {
+    await client.connect();
+    console.log('Connected to MongoDB Atlas');
+
+    const database = client.db('Cluster0');
+    const collection = database.collection('guilds');
+
+    // Find the document for the specific guild
+    const document = await collection.findOne({ guildId: guildId });
+
+    if (document) {
+      return document.rolesData;
+    } else {
+      return { guildId: guildId, availableroles: [], removedroles: [] };
+    }
+  } catch (error) {
+    console.error('Error connecting to MongoDB Atlas:', error);
+    errorLogStream.write(`Error connecting to MongoDB Atlas: ${error}\n`);
+    return { guildId: guildId, availableroles: [], removedroles: [] };
+  } finally {
+    await client.close();
+    console.log('Disconnected from MongoDB Atlas');
+  }
 }
 
 client.on('interactionCreate', async (interaction) => {
@@ -208,8 +278,16 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // Code to add a role as self-assignable
+        const rolesData = await getRolesData(guild.id);
+        const { availableroles, removedroles } = rolesData;
 
-        await interaction.reply(`Role ${role.name} has been added to the available roles.`);
+        if (!availableroles.includes(role.id)) {
+          availableroles.push(role.id);
+          await updateRolesData(guild.id, availableroles, removedroles);
+          await interaction.reply(`Role ${role.name} has been added to the available roles.`);
+        } else {
+          await interaction.reply('The role is already available.');
+        }
       } else if (subcommand === 'remove') {
         const role = options.getRole('role');
 
@@ -219,8 +297,20 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // Code to remove a role from self-assignable
+        const rolesData = await getRolesData(guild.id);
+        const { availableroles, removedroles } = rolesData;
 
-        await interaction.reply(`Role ${role.name} has been removed from the available roles.`);
+        if (availableroles.includes(role.id)) {
+          // Remove the role from the availableroles array
+          const updatedavailableroles = availableroles.filter((r) => r !== role.id);
+          
+          // Update the roles data in the database
+          await updateRolesData(guildId, updatedavailableroles, removedroles);
+        
+          await interaction.reply(`Role ${role.name} has been removed from the available roles.`);
+        } else {
+          await interaction.reply('The role is not available.');
+        }
       } else {
         await interaction.reply('You do not have permission to use this command.');
       }
@@ -228,12 +318,39 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// Register slash commands for each guild the bot is in
+async function updateRolesData(guildId, availableroles, removedroles) {
+  const client = new MongoClient(mongoConnectionString, { useNewUrlParser: true, useUnifiedTopology: true });
+
+  try {
+    await client.connect();
+    console.log('Connected to MongoDB Atlas');
+
+    const database = client.db('Cluster0');
+    const collection = database.collection('guilds');
+
+    // Update the document for the specific guild
+    await collection.updateOne(
+      { guildId: guildId },
+      { $set: { rolesData: { availableroles, removedroles } } },
+      { upsert: true }
+    );
+
+    console.log('Roles data updated successfully');
+  } catch (error) {
+    console.error('Error connecting to MongoDB Atlas:', error);
+    errorLogStream.write(`Error connecting to MongoDB Atlas: ${error}\n`);
+  } finally {
+    await client.close();
+    console.log('Disconnected from MongoDB Atlas');
+  }
+}
+
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   client.guilds.cache.forEach((guild) => {
     registerGuildSlashCommands(guild.id);
+    createGuildCollection(guild.id); // Create guild collection if it doesn't exist
   });
 });
 
