@@ -27,7 +27,7 @@ async function registerGuildSlashCommands(guildId) {
           {
             name: 'list',
             description: 'List available roles',
-            type: 1, // Subcommand type
+            type: 1,
           },
           {
             name: 'add',
@@ -45,12 +45,12 @@ async function registerGuildSlashCommands(guildId) {
           {
             name: 'remove',
             description: 'Remove a role from yourself',
-            type: 1, // Subcommand type
+            type: 1,
             options: [
               {
                 name: 'role',
                 description: 'The role to remove',
-                type: 8, // Role type
+                type: 8,
                 required: true,
               },
             ],
@@ -64,12 +64,12 @@ async function registerGuildSlashCommands(guildId) {
           {
             name: 'add',
             description: 'Add a role as self-assignable',
-            type: 1, // Subcommand type
+            type: 1,
             options: [
               {
                 name: 'role',
                 description: 'The role to add',
-                type: 8, // Role type
+                type: 8,
                 required: true,
               },
             ],
@@ -77,12 +77,12 @@ async function registerGuildSlashCommands(guildId) {
           {
             name: 'remove',
             description: 'Remove a role from self-assignable',
-            type: 1, // Subcommand type
+            type: 1,
             options: [
               {
                 name: 'role',
                 description: 'The role to remove',
-                type: 8, // Role type
+                type: 8,
                 required: true,
               },
             ],
