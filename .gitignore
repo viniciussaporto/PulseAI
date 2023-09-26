@@ -1,3 +1,5 @@
 /.env
 /node_modules
 error.log
+/venv
+/.vscode
